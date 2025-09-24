@@ -322,10 +322,18 @@ Available formats (cleaned URL):
     
     def clean_url_for_download(self, url: str) -> str:
         """Remove problematic parameters from social media URLs for downloading"""
+        
+        # Special handling for YouTube URLs - remove everything from ? symbol to end
+        if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
+            if '?' in url:
+                clean_url = url.split('?')[0]
+                if clean_url != url:
+                    logging.info(f"Cleaned YouTube URL: {url} -> {clean_url}")
+                return clean_url
+            return url
+        
         # Platform-specific parameters that can cause download issues (mobile app focus)
         platform_params = {
-            'youtube.com': ['si=', 'feature=', 't=', 'pp=', 'embeds_referring_euri=', 'app=', 'persist_app=', 'ab_channel='],
-            'youtu.be': ['si=', 'feature=', 't=', 'pp=', 'app=', 'ab_channel='],
             'instagram.com': ['igsh=', 'img_index=', 'utm_source=', 'utm_medium=', 'utm_campaign=', 'igshid='],
             'tiktok.com': ['is_from_webapp=', 'sender_device=', 'sender_web_id=', '_r=', '_t=', 'u_code=', 'preview_pb='],
             'twitter.com': ['t=', 's=', 'ref_src=', 'ref_url=', 'cn=', 'refsrc='],
