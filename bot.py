@@ -324,8 +324,8 @@ Available formats (cleaned URL):
         """Remove problematic parameters from social media URLs for downloading"""
         # Platform-specific parameters that can cause download issues (mobile app focus)
         platform_params = {
-            'youtube.com': ['si=', 'feature=', 't=', 'pp=', 'embeds_referring_euri=', 'app=', 'persist_app='],
-            'youtu.be': ['si=', 'feature=', 't=', 'pp=', 'app='],
+            'youtube.com': ['si=', 'feature=', 't=', 'pp=', 'embeds_referring_euri=', 'app=', 'persist_app=', 'ab_channel='],
+            'youtu.be': ['si=', 'feature=', 't=', 'pp=', 'app=', 'ab_channel='],
             'instagram.com': ['igsh=', 'img_index=', 'utm_source=', 'utm_medium=', 'utm_campaign=', 'igshid='],
             'tiktok.com': ['is_from_webapp=', 'sender_device=', 'sender_web_id=', '_r=', '_t=', 'u_code=', 'preview_pb='],
             'twitter.com': ['t=', 's=', 'ref_src=', 'ref_url=', 'cn=', 'refsrc='],
@@ -356,12 +356,14 @@ Available formats (cleaned URL):
             problematic_params = ['utm_source=', 'utm_medium=', 'utm_campaign=', 'utm_term=', 'utm_content=', 
                                 'utm_name=', 'igsh=', 'igshid=', 'fbclid=', 'gclid=', 'mc_cid=', 'mc_eid=']
         
-        # Remove problematic parameters
+        # Remove problematic parameters (more precise handling)
         original_url = url
         for param in problematic_params:
+            # Handle ?param=value (remove everything from ? onwards)
             if f'?{param}' in url:
                 url = url.split(f'?{param}')[0]
                 break
+            # Handle &param=value (remove everything from & onwards)
             elif f'&{param}' in url:
                 url = url.split(f'&{param}')[0]
                 break

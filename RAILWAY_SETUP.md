@@ -19,7 +19,7 @@
 1. In your project dashboard, click **"Variables"** tab
 2. Click **"+ New Variable"** button
 3. Add the bot token:
-   - **Name**: `BOT_TOKEN`
+   - **Name**: ` adedBOT_TOKEN`
    - **Value**: `7963774785:AAHBSOEAoxVTPXUCo47kZmvdh--xySjtN0I`
 4. Click **"Add"**
 
