@@ -106,7 +106,7 @@ Just paste the link and I'll handle the rest! 🚀
         if url.startswith('@'):
             url = url[1:]  # Remove @ symbol
         
-        # Remove tracking parameters that can cause issues
+        # Remove tracking parameters that can cause issues (but keep si= for YouTube analytics)
         tracking_params = ['utm_source=', 'utm_medium=', 'utm_name=', 'utm_term=', 'utm_content=', 'utm_campaign=']
         for param in tracking_params:
             if f'?{param}' in url:
@@ -170,9 +170,45 @@ Available formats:
                     return
 
                 else:
-                    # Fallback if can't get formats
+                    # Fallback if can't get formats - try cleaning the URL
+                    clean_url = self.clean_url_for_download(url)
+                    if clean_url != url:
+                        await processing_msg.edit_text("🔄 Trying cleaned URL for better compatibility...")
+                        # Try with cleaned URL
+                        formats = await self.get_youtube_formats(clean_url)
+                        if formats:
+                            # Success with cleaned URL - show formats
+                            keyboard = []
+                            for fmt in formats:
+                                if fmt['quality'] == 'Audio Only':
+                                    quality_text = f"🎵 {fmt['quality']} (M4A)"
+                                else:
+                                    quality_text = f"📺 {fmt['quality']} (Video Only)"
+                                callback_data = f"quality:{fmt['id']}:{clean_url}"
+                                keyboard.append([InlineKeyboardButton(quality_text, callback_data=callback_data)])
+                            
+                            keyboard.append([InlineKeyboardButton("⭐ Best Available", callback_data=f"quality:best:{clean_url}")])
+                            reply_markup = InlineKeyboardMarkup(keyboard)
+                            
+                            quality_message = f"""```
+Available formats (cleaned URL):
+{chr(10).join([f"• {fmt['quality']}" for fmt in formats])}
+```"""
+                            
+                            await processing_msg.edit_text(
+                                quality_message,
+                                reply_markup=reply_markup,
+                                parse_mode=ParseMode.MARKDOWN
+                            )
+                            
+                            context.user_data['pending_url'] = clean_url
+                            context.user_data['temp_dir'] = temp_dir
+                            return
+                    
+                    # Final fallback - download with best quality
                     await processing_msg.edit_text("🔄 Getting formats failed, downloading best quality...")
-                    media_info = await self.download_with_yt_dlp(url, temp_dir)
+                    download_url = clean_url if clean_url != url else url
+                    media_info = await self.download_with_yt_dlp(download_url, temp_dir)
             else:
                 # Detect platform and choose optimal downloader
                 platform = self.is_social_media_url(url)
@@ -246,6 +282,19 @@ Available formats:
                     
                     if not media_info:
                         media_info = await self.download_with_yt_dlp(url, temp_dir)
+                    
+                    # If download failed, try with cleaned URL
+                    if not media_info:
+                        clean_url = self.clean_url_for_download(url)
+                        if clean_url != url:
+                            await processing_msg.edit_text("🔄 Trying cleaned URL for better compatibility...")
+                            
+                            # Try gallery-dl with cleaned URL first
+                            media_info = await self.download_with_gallery_dl(clean_url, temp_dir)
+                            
+                            # If still failed, try yt-dlp with cleaned URL
+                            if not media_info:
+                                media_info = await self.download_with_yt_dlp(clean_url, temp_dir)
 
             if 'media_info' in locals() and media_info:
                 await self.send_media_to_user(update, media_info)
@@ -271,32 +320,93 @@ Available formats:
         """Check if URL is from YouTube"""
         return 'youtube.com' in url or 'youtu.be' in url
     
+    def clean_url_for_download(self, url: str) -> str:
+        """Remove problematic parameters from social media URLs for downloading"""
+        # Platform-specific parameters that can cause download issues (mobile app focus)
+        platform_params = {
+            'youtube.com': ['si=', 'feature=', 't=', 'pp=', 'embeds_referring_euri=', 'app=', 'persist_app='],
+            'youtu.be': ['si=', 'feature=', 't=', 'pp=', 'app='],
+            'instagram.com': ['igsh=', 'img_index=', 'utm_source=', 'utm_medium=', 'utm_campaign=', 'igshid='],
+            'tiktok.com': ['is_from_webapp=', 'sender_device=', 'sender_web_id=', '_r=', '_t=', 'u_code=', 'preview_pb='],
+            'twitter.com': ['t=', 's=', 'ref_src=', 'ref_url=', 'cn=', 'refsrc='],
+            'x.com': ['t=', 's=', 'ref_src=', 'ref_url=', 'cn=', 'refsrc='],
+            'facebook.com': ['fbclid=', '__tn__=', '__cft__=', 'hash=', '_rdr=', 'app_id=', 'display='],
+            'fb.watch': ['fbclid=', '__tn__=', '__cft__=', '_rdr='],
+            'reddit.com': ['context=', 'share_id=', 'utm_source=', 'utm_medium=', 'utm_name=', 'utm_term=', 'utm_content='],
+            'redd.it': ['context=', 'share_id=', 'utm_source=', 'utm_medium='],
+            'pinterest.com': ['sent=', 'from_app='],
+            'tumblr.com': ['source=', 'ref='],
+            'linkedin.com': ['trackingId=', 'refId=', 'lipi=', 'licu='],
+            'telegram.org': ['single=', 'thread='],
+            'telegram.me': ['single=', 'thread='],
+            'snapchat.com': ['sender_web_id=', 'utm_source='],
+            'discord.com': ['utm_source=', 'utm_medium='],
+            'whatsapp.com': ['text=', 'app_absent=']
+        }
+        
+        # Find matching platform
+        problematic_params = []
+        for platform, params in platform_params.items():
+            if platform in url.lower():
+                problematic_params = params
+                break
+        
+        # If no specific platform match, use common tracking parameters (mobile apps often add these)
+        if not problematic_params:
+            problematic_params = ['utm_source=', 'utm_medium=', 'utm_campaign=', 'utm_term=', 'utm_content=', 
+                                'utm_name=', 'igsh=', 'igshid=', 'fbclid=', 'gclid=', 'mc_cid=', 'mc_eid=']
+        
+        # Remove problematic parameters
+        original_url = url
+        for param in problematic_params:
+            if f'?{param}' in url:
+                url = url.split(f'?{param}')[0]
+                break
+            elif f'&{param}' in url:
+                url = url.split(f'&{param}')[0]
+                break
+        
+        # Log if URL was cleaned
+        if url != original_url:
+            logging.info(f"Cleaned URL for download: {original_url} -> {url}")
+                
+        return url
+    
     def is_social_media_url(self, url: str) -> str:
-        """Detect social media platform type"""
-        if 'pinterest.com' in url:
+        """Detect social media platform type (mobile app aware)"""
+        url_lower = url.lower()
+        
+        # Check for mobile app indicators and platform patterns
+        if 'pinterest.com' in url_lower:
             return 'pinterest'
-        elif 'deviantart.com' in url:
+        elif 'deviantart.com' in url_lower:
             return 'deviantart'
-        elif 'flickr.com' in url:
+        elif 'flickr.com' in url_lower:
             return 'flickr'
-        elif 'reddit.com' in url or 'redd.it' in url:
+        elif 'reddit.com' in url_lower or 'redd.it' in url_lower:
             return 'reddit'
-        elif 'tumblr.com' in url:
+        elif 'tumblr.com' in url_lower:
             return 'tumblr'
-        elif 'behance.net' in url:
+        elif 'behance.net' in url_lower:
             return 'behance'
-        elif 'linkedin.com' in url:
+        elif 'linkedin.com' in url_lower or 'lnkd.in' in url_lower:
             return 'linkedin'
-        elif 't.me' in url:
+        elif 't.me' in url_lower or 'telegram.me' in url_lower or 'telegram.org' in url_lower:
             return 'telegram'
-        elif 'instagram.com' in url:
+        elif 'instagram.com' in url_lower:
             return 'instagram'
-        elif 'twitter.com' in url or 'x.com' in url:
+        elif 'twitter.com' in url_lower or 'x.com' in url_lower:
             return 'twitter'
-        elif 'facebook.com' in url:
+        elif 'facebook.com' in url_lower or 'fb.watch' in url_lower or 'fb.me' in url_lower:
             return 'facebook'
-        elif 'tiktok.com' in url:
+        elif 'tiktok.com' in url_lower or 'vm.tiktok.com' in url_lower:
             return 'tiktok'
+        elif 'snapchat.com' in url_lower or 'snap.com' in url_lower:
+            return 'snapchat'
+        elif 'discord.com' in url_lower or 'discord.gg' in url_lower:
+            return 'discord'
+        elif 'whatsapp.com' in url_lower or 'wa.me' in url_lower:
+            return 'whatsapp'
         else:
             return 'unknown'
 
@@ -454,9 +564,12 @@ Available formats:
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+                logging.warning(f"YouTube format detection timeout for URL: {url}")
                 return None
 
             if process.returncode != 0:
+                error_msg = stderr.decode().strip()
+                logging.warning(f"YouTube format detection failed for URL: {url}, Error: {error_msg}")
                 return None
 
             # Parse format list and extract formats with audio or pre-combined
